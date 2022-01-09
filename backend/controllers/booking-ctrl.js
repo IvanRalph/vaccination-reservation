@@ -1,42 +1,21 @@
 const Booking = require('../db/models/booking-model')
-const HealthCenter = require('../db/models/center-model');
+const {isTimeSlotAvailable, isFullNameUnique} = require('../services/booking/customValidation')
 
 createBooking = async (req, res) => {
     const body = req.body;
     const booking = new Booking(body);
-    let bookedSlotCount = 0;
-
-    if (Object.keys(body).length === 0) {
-        return res.status(400).json({success: false, message: 'You must provide your details for booking.'})
-    }
-
-    if (!booking) {
-        return res.status(400).json({success: false, error: err})
-    }
 
     if (booking.validateSync()) {
         return res.status(400).json({success: false, error: booking.validateSync().errors, message: 'Booking validation failed'})
     }
 
-    bookedSlotCount = await Booking.find({slot: body.slot, health_center_id: body.health_center_id}, ).clone();
-
-    let bookedName = await Booking.find({full_name: body.full_name}).clone();
-
-    if (bookedName.length >= 1) {
-        return res.status(400).json({
-            success: false,
-            message: 'Booking already exists under same name.'
-        })
-    }
-
-    let healthCenter = await HealthCenter.findOne({_id : body.health_center_id}).clone();
-
-    if (!healthCenter) {
-        return res.status(400).json({success: false, message: 'Vaccine Center field is required'})
-    }
-
-    if (bookedSlotCount.length >= healthCenter.nurses.length) {
+    if (!await isTimeSlotAvailable(body)) {
+        console.log('HIT');
         return res.status(400).json({success: false, message: 'Time slot is fully booked, select another.'})
+    }
+
+    if (!await isFullNameUnique(body.full_name)) {
+        return res.status(400).json({success: false, message: 'A schedule already exists under this name.'})
     }
 
     booking
@@ -53,7 +32,7 @@ createBooking = async (req, res) => {
                 error,
                 message: 'Booking not created'
             })
-        })
+        });
 };
 
 updateBooking = async (req, res) => {
@@ -67,7 +46,7 @@ updateBooking = async (req, res) => {
         })
     }
 
-    let booking = Booking.findOne({_id: req.params.id}).exec();
+    let booking = await Booking.findOne({_id: req.params.id}).exec();
 
     if (!booking) {
         return res.status(404).json({
@@ -76,26 +55,13 @@ updateBooking = async (req, res) => {
         })
     }
 
-    if (Object.keys(body).length === 0) {
-        return res.status(400).json({success: false, message: 'You must provide your details for booking.'})
+    if (body.full_name !== booking.full_name && !await isFullNameUnique(body.full_name)) {
+        return res.status(400).json({success: false, message: 'A schedule already exists under this name.'})
     }
 
-    if (!booking) {
-        return res.status(400).json({success: false, error: err})
-    }
-
-    bookedSlotCount = await Booking.find({slot: body.slot, health_center_id: body.health_center_id}, ).clone();
-
-    let healthCenter = await HealthCenter.findOne({_id : body.health_center_id}).clone();
-
-    if (!healthCenter) {
-        return res.status(400).json({success: false, message: 'Vaccine Center field is required'})
-    }
-
-    if (bookedSlotCount.length >= healthCenter.nurses.length) {
+    if (body.slot !== booking.slot && !await isTimeSlotAvailable(body)) {
         return res.status(400).json({success: false, message: 'Time slot is fully booked, select another.'})
     }
-
 
     let payload = {
         $set : {
@@ -105,7 +71,6 @@ updateBooking = async (req, res) => {
             health_center_id: body.health_center_id
         }
     }
-
 
     Booking
         .updateOne({_id: req.params.id}, payload)
